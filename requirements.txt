@@ -5,4 +5,4 @@ langchain-openai==0.0.2
 python-docx==0.8.11
 pandas==1.5.3
 pytz==2023.3
-langchain-core==0.1.1
+langchain-core>=0.1.7,<0.2
