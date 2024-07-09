@@ -1,6 +1,11 @@
+# streamlit run Patentability_20240709.py
+
 import streamlit as st
 import openai
-from langchain.chat_models import ChatOpenAI
+# from langchain.chat_models import ChatOpenAI
+# from langchain.prompts import PromptTemplate
+# from langchain.chains import LLMChain
+from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from docx import Document
@@ -13,15 +18,6 @@ import smtplib
 import os
 from datetime import datetime
 import pytz
-
-import streamlit as st
-
-try:
-    from langchain.chat_models import ChatOpenAI
-    st.success("langchain_community module is successfully imported!")
-except ImportError as e:
-    st.error(f"Error importing langchain_community module: {e}")
-
 
 st.set_page_config(layout='wide')
 
@@ -45,11 +41,24 @@ def load_docx(file):
 def get_doc_text(doc):
     return "\n".join([para.text for para in doc.paragraphs])
 
+def save_llm_responses_to_file(responses):
+    timestamp = get_timestamp()
+    file_name = f"llm_responses_{timestamp}.txt"
+    
+    with open(file_name, 'w') as f:
+        for key, value in responses.items():
+            f.write(f"{key.upper()}:\n\n")
+            f.write(f"{value}\n\n")
+            f.write("-" * 50 + "\n\n")
+    
+    return file_name
+
 def create_txt_file(doc_text, file_name):
     try:
-        with open(file_name, 'w') as f:
+        file_path = os.path.join(os.getcwd(), file_name)
+        with open(file_path, 'w', encoding='utf-8') as f:
             f.write(doc_text)
-        return file_name
+        return file_path
     except IOError as e:
         st.error(f"Error creating text file: {str(e)}")
         return None
@@ -60,14 +69,14 @@ def get_timestamp():
 
 def generate_responses(doc_text):
     try:
-        chat_llm = ChatOpenAI(temperature=0.8, openai_api_key=openai_api_key, model="gpt-4o")
+        chat_llm = ChatOpenAI(temperature=0.8, api_key=openai_api_key, model="gpt-4")
 
         prompts = {
-            "summary": "Provide a summary of the above information in 50-200 words. Ensure the summary is formatted as a paragraph.",
-            "potential_customers": "Based on the above information, list potential customers for this idea in bullet points. Ensure each bullet point starts with a hyphen and a space.",
-            "market_report": "Generate a market report based on the above information between 100-500 words. Ensure the report is formatted as paragraphs.",
-            "similar_products": "List similar products related to this idea in bullet points. Ensure each bullet point starts with a hyphen and a space.",
-            "provisional_patent": "Draft a provisional patent based on the above information. Format it as Patent_Title | Patent_Abstract | Patent_Claims and ensure each section is clearly labeled."
+            "summary": "Provide a summary of the above information in 50-200 words. Format as plain text, not Markdown.",
+            "potential_customers": "Based on the above information, list potential customers for this idea. Use plain text bullet points starting with a hyphen and a space.",
+            "market_report": "Generate a market report based on the above information between 100-500 words. Format as plain text paragraphs.",
+            "similar_products": "List similar products related to this idea. Use plain text bullet points starting with a hyphen and a space.",
+            "provisional_patent": "Draft a provisional patent based on the above information. Format it as plain text with sections labeled Patent_Title, Patent_Abstract, and Patent_Claims."
         }
 
         responses = {}
@@ -78,9 +87,13 @@ def generate_responses(doc_text):
             response = chat_chain.generate([input_data])
             responses[key] = response.generations[0][0].text if response.generations else "No response generated"
 
+        # Store responses in session state
+        st.session_state.responses = responses
+
         return responses
     except Exception as e:
         st.error(f"Error generating responses: {str(e)}")
+        st.session_state.responses = None  # Ensure responses are cleared if there's an error
         return None
 
 def process_docx(uploaded_file):
@@ -94,27 +107,27 @@ def display_responses(responses):
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Summary")
-            st.markdown(f"<div style='border:1px solid black;padding:10px;'>{responses['summary']}</div>", unsafe_allow_html=True)
+            st.markdown(responses['summary'])
             
         with col2:
             st.subheader("Potential Customers")
-            st.markdown(f"<div style='border:1px solid black;padding:10px;'>{responses['potential_customers']}</div>", unsafe_allow_html=True)
+            st.markdown(responses['potential_customers'])
 
         col3, col4 = st.columns(2)
         with col3:
             st.subheader("Market Report")
-            st.markdown(f"<div style='border:1px solid black;padding:10px;'>{responses['market_report']}</div>", unsafe_allow_html=True)
+            st.markdown(responses['market_report'])
             
         with col4:
             st.subheader("Similar Products")
-            st.markdown(f"<div style='border:1px solid black;padding:10px;'>{responses['similar_products']}</div>", unsafe_allow_html=True)
+            st.markdown(responses['similar_products'])
 
         st.subheader("Provisional Patent Draft")
-        st.markdown(f"<div style='border:1px solid black;padding:10px;'>{responses['provisional_patent']}</div>", unsafe_allow_html=True)
+        st.markdown(responses['provisional_patent'])
     else:
         st.error("No responses to display.")
 
-def send_email(to_address, subject, body, attachment_path):
+def send_email(to_address, subject, body, attachment_paths):
     try:
         from_address = email_address
         password = email_password
@@ -127,13 +140,19 @@ def send_email(to_address, subject, body, attachment_path):
         message['Subject'] = timestamped_subject
 
         message.attach(MIMEText(body, 'plain'))
-        if attachment_path:
-            with open(attachment_path, 'rb') as attachment:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(attachment.read())
-            encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f"attachment; filename= {os.path.basename(attachment_path)}")
-            message.attach(part)
+        
+        # Attach all files
+        for attachment_path in attachment_paths:
+            # st.write(f"Debug: Attaching file {attachment_path}")
+            if os.path.exists(attachment_path):
+                with open(attachment_path, 'rb') as attachment:
+                    part = MIMEBase('application', 'octet-stream')
+                    part.set_payload(attachment.read())
+                encoders.encode_base64(part)
+                part.add_header('Content-Disposition', f"attachment; filename= {os.path.basename(attachment_path)}")
+                message.attach(part)
+            else:
+                st.error(f"Debug: Attachment file not found: {attachment_path}")
 
         with smtplib.SMTP('smtp.gmail.com', 587) as session:
             session.starttls()
@@ -145,7 +164,7 @@ def send_email(to_address, subject, body, attachment_path):
     except Exception as e:
         st.error(f"Error sending email: {str(e)}")
         return None
-
+    
 # Initialize session state
 if "button_clicked" not in st.session_state:
     st.session_state.button_clicked = False
@@ -165,15 +184,23 @@ if uploaded_file:
         txt_file_path = create_txt_file(doc_text, txt_file_name)
         
         if txt_file_path:
-            upload_email_result = send_email("info@eastridge-analytics.com", "New File Upload", "A new file has been uploaded. Please find the content attached.", txt_file_path)
-            if upload_email_result:
-                st.success("File uploaded.")
+            # st.write(f"Debug: Created file at {txt_file_path}")
+            if os.path.exists(txt_file_path):
+                # st.write("Debug: File exists")
+                upload_email_result = send_email("info@eastridge-analytics.com", "New File Upload", "A new file has been uploaded. Please find the content attached.", [txt_file_path])
+                if upload_email_result:
+                    st.success("File uploaded.")
+                else:
+                    st.error("Failed to send initial review email. Please try again.")
             else:
-                st.error("Failed to send initial review email. Please try again.")
+                st.error(f"Debug: File does not exist at {txt_file_path}")
             
             # Clean up the generated .txt file after sending
             if os.path.exists(txt_file_path):
                 os.remove(txt_file_path)
+                # st.write("Debug: Temporary file removed")
+        else:
+            st.error("Failed to create temporary file")
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -192,20 +219,35 @@ if uploaded_file:
             col1, col2, col3 = st.columns([1,2,1])
             with col2:
                 if st.button("Send docx to Eastridge Analytics for a Patent Landscape and Novelty Quote", key="novelty_button", use_container_width=True):
-                    txt_file_name = f"document_content_{get_timestamp()}.txt"
-                    txt_file_path = create_txt_file(doc_text, txt_file_name)
-                    
-                    if txt_file_path:
-                        result = send_email("info@eastridge-analytics.com", "Novelty Score Request", "Please find attached the document content in .txt format for novelty assessment.", txt_file_path)
-                        if result:
-                            st.success(result)
-                        else:
-                            st.error("Failed to send email. Please try again later.")
-                        
-                        if os.path.exists(txt_file_path):
-                            os.remove(txt_file_path)
+                    if 'responses' not in st.session_state:
+                        st.error("Please generate the Patent Assessment Report first.")
                     else:
-                        st.error("Failed to create temporary file. Please try again.")
+                        txt_file_name = f"document_content_{get_timestamp()}.txt"
+                        txt_file_path = create_txt_file(doc_text, txt_file_name)
+
+                        if txt_file_path:
+                            # Save LLM responses to a file
+                            llm_responses_file = save_llm_responses_to_file(st.session_state.responses)
+
+                            # Prepare email body
+                            email_body = "Please find attached:\n1. The document content in .txt format for novelty assessment.\n2. The LLM-generated responses for reference."
+
+                            # Send email with both attachments
+                            result = send_email("info@eastridge-analytics.com", 
+                                                "Novelty Score Request", 
+                                                email_body, 
+                                                [txt_file_path, llm_responses_file])
+                            if result:
+                                st.success(result)
+                            else:
+                                st.error("Failed to send email. Please try again later.")
+
+                            # Clean up temporary files
+                            for file_path in [txt_file_path, llm_responses_file]:
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                        else:
+                            st.error("Failed to create temporary file. Please try again.")
         
         st.markdown("<br>", unsafe_allow_html=True)
         
