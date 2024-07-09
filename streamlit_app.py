@@ -14,6 +14,15 @@ import os
 from datetime import datetime
 import pytz
 
+import streamlit as st
+
+try:
+    from langchain.chat_models import ChatOpenAI
+    st.success("langchain_community module is successfully imported!")
+except ImportError as e:
+    st.error(f"Error importing langchain_community module: {e}")
+
+
 st.set_page_config(layout='wide')
 
 # Use secrets for sensitive information
