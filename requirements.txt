@@ -4,3 +4,4 @@ pytz
 openai
 langchain
 pandas
+langchain_community
