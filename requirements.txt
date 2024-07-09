@@ -4,5 +4,6 @@ pytz
 openai
 langchain
 pandas
-langchain-community==0.2.7
+langchain
+langchain-openai
 
