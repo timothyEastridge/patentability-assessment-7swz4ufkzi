@@ -180,8 +180,8 @@ if uploaded_file:
         doc_text = get_doc_text(doc)
         
         # Display an interactive preview of the loaded document
-        st.subheader("Document Preview")
-        st.text_area("Document content:", value=doc_text, height=300)
+        # st.subheader("Document Preview")
+        st.text_area("Document content:", value=doc_text, height=100)
         
         # Send email with .txt version of the docx as soon as it's uploaded
         txt_file_name = f"file_upload_{get_timestamp()}.txt"
