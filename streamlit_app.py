@@ -1,10 +1,5 @@
-# streamlit run Patentability_20240709.py
-
 import streamlit as st
 import openai
-# from langchain.chat_models import ChatOpenAI
-# from langchain.prompts import PromptTemplate
-# from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -33,13 +28,18 @@ if not openai_api_key:
 def load_docx(file):
     try:
         doc = Document(file)
-        return doc
+        return "\n".join([para.text for para in doc.paragraphs])
     except Exception as e:
-        st.error(f"Error loading document: {str(e)}")
+        st.error(f"Error loading .docx file: {str(e)}")
         return None
 
-def get_doc_text(doc):
-    return "\n".join([para.text for para in doc.paragraphs])
+def load_tex(file):
+    try:
+        content = file.read().decode('utf-8')
+        return content
+    except Exception as e:
+        st.error(f"Error loading .tex file: {str(e)}")
+        return None
 
 def save_llm_responses_to_file(responses):
     timestamp = get_timestamp()
@@ -96,12 +96,6 @@ def generate_responses(doc_text):
         st.session_state.responses = None  # Ensure responses are cleared if there's an error
         return None
 
-def process_docx(uploaded_file):
-    doc = load_docx(uploaded_file)
-    if doc:
-        return get_doc_text(doc)
-    return None
-
 def display_responses(responses):
     if responses:
         col1, col2 = st.columns(2)
@@ -127,12 +121,12 @@ def display_responses(responses):
     else:
         st.error("No responses to display.")
 
-def send_email(to_address, subject, body, attachment_paths):
+def send_email(to_address, subject, body, attachment_paths, uploaded_file_name):
     try:
         from_address = email_address
         password = email_password
 
-        timestamped_subject = f"{subject} - {get_timestamp()}"
+        timestamped_subject = f"{subject} - {uploaded_file_name} - {get_timestamp()}"
 
         message = MIMEMultipart()
         message['From'] = from_address
@@ -141,9 +135,7 @@ def send_email(to_address, subject, body, attachment_paths):
 
         message.attach(MIMEText(body, 'plain'))
         
-        # Attach all files
         for attachment_path in attachment_paths:
-            # st.write(f"Debug: Attaching file {attachment_path}")
             if os.path.exists(attachment_path):
                 with open(attachment_path, 'rb') as attachment:
                     part = MIMEBase('application', 'octet-stream')
@@ -164,34 +156,43 @@ def send_email(to_address, subject, body, attachment_paths):
     except Exception as e:
         st.error(f"Error sending email: {str(e)}")
         return None
-    
+
 # Initialize session state
 if "button_clicked" not in st.session_state:
     st.session_state.button_clicked = False
+if "assessment_button_clicked" not in st.session_state:
+    st.session_state.assessment_button_clicked = False
+if "patentability_button_clicked" not in st.session_state:
+    st.session_state.patentability_button_clicked = False
 
-st.markdown("<h1 style='text-align: center;'>Patentability and Commercialization Assessment</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Invention Disclosure Assessment</h1>", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Drop a .docx file of the Invention Disclosure Form here", type="docx")
+uploaded_file = st.file_uploader("Drop a .docx or .tex file of the Invention Disclosure Form here", type=["docx", "tex"])
 
 if uploaded_file:
-    doc = load_docx(uploaded_file)
+    file_name, file_extension = os.path.splitext(uploaded_file.name)
     
-    if doc:
-        doc_text = get_doc_text(doc)
-        
-        # Display an interactive preview of the loaded document
-        # st.subheader("Document Preview")
+    if file_extension.lower() == '.docx':
+        doc_text = load_docx(uploaded_file)
+    elif file_extension.lower() == '.tex':
+        doc_text = load_tex(uploaded_file)
+    else:
+        st.error("Unsupported file type. Please upload a .docx or .tex file.")
+        doc_text = None
+
+    if doc_text:
         st.text_area("Document content:", value=doc_text, height=100)
         
-        # Send email with .txt version of the docx as soon as it's uploaded
         txt_file_name = f"file_upload_{get_timestamp()}.txt"
         txt_file_path = create_txt_file(doc_text, txt_file_name)
         
         if txt_file_path:
-            # st.write(f"Debug: Created file at {txt_file_path}")
             if os.path.exists(txt_file_path):
-                # st.write("Debug: File exists")
-                upload_email_result = send_email("info@eastridge-analytics.com", "New File Upload", "A new file has been uploaded. Please find the content attached.", [txt_file_path])
+                upload_email_result = send_email("info@eastridge-analytics.com", 
+                                                 "New File Upload", 
+                                                 "A new file has been uploaded. Please find the content attached.", 
+                                                 [txt_file_path],
+                                                 uploaded_file.name)
                 if upload_email_result:
                     st.success("File uploaded.")
                 else:
@@ -199,10 +200,8 @@ if uploaded_file:
             else:
                 st.error(f"Debug: File does not exist at {txt_file_path}")
             
-            # Clean up the generated .txt file after sending
             if os.path.exists(txt_file_path):
                 os.remove(txt_file_path)
-                # st.write("Debug: Temporary file removed")
         else:
             st.error("Failed to create temporary file")
         
@@ -211,18 +210,24 @@ if uploaded_file:
         col1, col2, col3 = st.columns([1,2,1])
         with col2:
             if st.button("Create Patent Assessment Report", key="run_button", use_container_width=True):
+                st.session_state.assessment_button_clicked = True
                 with st.spinner('Processing...'):
                     responses = generate_responses(doc_text)
                     if responses:
                         display_responses(responses)
                         st.session_state.button_clicked = True
-                
+
+            if not st.session_state.assessment_button_clicked:
+                st.info("This button generates an AI-powered patent assessment report based on your uploaded document. The report includes a summary, potential customers, market report, similar products, and a provisional patent draft.", icon="ℹ️")
+
         st.markdown("<br>", unsafe_allow_html=True)
-        
-        if st.session_state.button_clicked:
+        st.markdown("<br>", unsafe_allow_html=True)  # Additional line of whitespace
+
+        if st.session_state.get('button_clicked', False):
             col1, col2, col3 = st.columns([1,2,1])
             with col2:
-                if st.button("Send docx to Eastridge Analytics for a Patent Landscape and Novelty Quote", key="novelty_button", use_container_width=True):
+                if st.button("Request Patentability Assessment", key="novelty_button", use_container_width=True):
+                    st.session_state.patentability_button_clicked = True
                     if 'responses' not in st.session_state:
                         st.error("Please generate the Patent Assessment Report first.")
                     else:
@@ -230,30 +235,30 @@ if uploaded_file:
                         txt_file_path = create_txt_file(doc_text, txt_file_name)
 
                         if txt_file_path:
-                            # Save LLM responses to a file
                             llm_responses_file = save_llm_responses_to_file(st.session_state.responses)
 
-                            # Prepare email body
                             email_body = "Please find attached:\n1. The document content in .txt format for novelty assessment.\n2. The LLM-generated responses for reference."
 
-                            # Send email with both attachments
                             result = send_email("info@eastridge-analytics.com", 
                                                 "Novelty Score Request", 
                                                 email_body, 
-                                                [txt_file_path, llm_responses_file])
+                                                [txt_file_path, llm_responses_file],
+                                                uploaded_file.name)
                             if result:
                                 st.success(result)
                             else:
                                 st.error("Failed to send email. Please try again later.")
 
-                            # Clean up temporary files
                             for file_path in [txt_file_path, llm_responses_file]:
                                 if os.path.exists(file_path):
                                     os.remove(file_path)
                         else:
                             st.error("Failed to create temporary file. Please try again.")
-        
+
+                if not st.session_state.patentability_button_clicked:
+                    st.info("This button will email Eastridge Analytics with your uploaded information. We will send you a quote with a proprietary patent landscape and novelty assessment.", icon="ℹ️")
+
         st.markdown("<br>", unsafe_allow_html=True)
         
 else:
-    st.warning("Please upload a .docx file.")
+    st.warning("Please upload a .docx or .tex file.")
